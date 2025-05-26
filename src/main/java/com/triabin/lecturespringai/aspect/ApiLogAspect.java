@@ -3,7 +3,8 @@ package com.triabin.lecturespringai.aspect;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONException;
 import com.alibaba.fastjson2.JSONWriter;
-import lombok.extern.slf4j.Slf4j;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.aspectj.lang.JoinPoint;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.AfterThrowing;
@@ -26,10 +27,11 @@ import java.util.concurrent.CompletableFuture;
  */
 @Component
 @Aspect
-@Slf4j
 public class ApiLogAspect {
 
     private static final int MAX_PARAM_LENGTH = 2000;
+
+    private static final Logger logger = LogManager.getLogger(ApiLogAspect.class);
 
     @Pointcut("@within(org.springframework.web.bind.annotation.RestController) && within(com.triabin.lecturespringai.controller..*)")
     public void logPointCut() {
@@ -45,18 +47,15 @@ public class ApiLogAspect {
         // 1. 请求参数记录（智能截断）
         try {
             Object[] args = joinPoint.getArgs();
-            String params = JSON.toJSONString(args,
-                    JSONWriter.Feature.IgnoreNonFieldGetter,
-                    JSONWriter.Feature.WriteBigDecimalAsPlain);
+            String params = JSON.toJSONString(args, JSONWriter.Feature.IgnoreNonFieldGetter, JSONWriter.Feature.WriteBigDecimalAsPlain);
 
             if (params.length() > MAX_PARAM_LENGTH) {
-                params = params.substring(0, MAX_PARAM_LENGTH) + "...[TRUNCATED]";
+                params = params.substring(0, MAX_PARAM_LENGTH) + "...【截断】";
             }
 
-            log.info("[REQUEST] traceId={} | method={} | params={}",
-                    traceId, method.getName(), params);
+            logger.info("【请求】 traceId={} | method={} | params={}", traceId, method.getName(), params);
         } catch (JSONException e) {
-            log.warn("[PARAM_SERIALIZE_ERROR] {}", e.getMessage());
+            logger.warn("【参数序列化异常】 {}", e.getMessage());
         }
 
         // 2. 方法执行与耗时统计
@@ -71,14 +70,11 @@ public class ApiLogAspect {
         // 3. 响应结果处理（异步记录）
         CompletableFuture.runAsync(() -> {
             try {
-                String response = JSON.toJSONString(result,
-                        JSONWriter.Feature.PrettyFormat,
-                        JSONWriter.Feature.WriteNulls);
+                String response = JSON.toJSONString(result, JSONWriter.Feature.PrettyFormat, JSONWriter.Feature.WriteNulls);
 
-                log.info("[RESPONSE] traceId={} | cost={}ms | result={}",
-                        traceId, MDC.get("costTime"), response);
+                logger.info("【响应】 traceId={} | cost={}ms | result={}", traceId, MDC.get("costTime"), response);
             } catch (Exception e) {
-                log.error("[RESULT_SERIALIZE_ERROR]", e);
+                logger.error("响应结果序列化异常", e);
             } finally {
                 MDC.remove("costTime");
             }
@@ -90,10 +86,6 @@ public class ApiLogAspect {
     @AfterThrowing(pointcut = "logPointCut()", throwing = "ex")
     public void logException(JoinPoint joinPoint, Throwable ex) {
         Method method = ((MethodSignature) joinPoint.getSignature()).getMethod();
-        log.error("[EXCEPTION] method={} | errorType={} | message={} | stack={}",
-                method.getName(),
-                ex.getClass().getSimpleName(),
-                ex.getMessage(),
-                ex.getStackTrace());
+        logger.error("【异常】 method={} | errorType={} | message={} | stack={}", method.getName(), ex.getClass().getSimpleName(), ex.getMessage(), ex.getStackTrace());
     }
 }

@@ -3,6 +3,7 @@ package com.triabin.lecturespringai.controller;
 import lombok.RequiredArgsConstructor;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -14,11 +15,12 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RequiredArgsConstructor
 @RestController
+@RequestMapping("/ai")
 public class ChatAIController {
 
     private final ChatClient chatClient;
 
-    @GetMapping("/ai/chat")
+    @GetMapping("/chat")
     public String chat(@RequestParam(name = "message") String message) {
         return chatClient.prompt()
                 .user(message) // 传入输入内容
