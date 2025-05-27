@@ -1,5 +1,7 @@
 # SpringAI学习项目
 
+SpringAI官方文档：[SpringAI](https://docs.spring.io/spring-ai/reference/index.html)
+
 来源：[哔哩哔哩：【全网最硬核】Spring AI天花板级教程！Ollama+Deepseek本地大模型实战 | 企业级RAG应用/智能客服/数据安全一次打通](https://www.bilibili.com/video/BV1R6X3YfEcg)
 
 ## 环境
@@ -408,5 +410,358 @@ CREATE INDEX ON vector_store USING HNSW (embedding vector_cosine_ops);
 
 2、导入数据到向量数据库
 
+可以使用`org.springframework.ai.vectorstore.VectorStore`提供的`write`方法直接导入，具体操作为将要导入向量数据库的数据切割好，然后分别新建为`org.springframework.ai.document.Document`（`new Document(String content)`），使用集合批量写入向量数据库（`VectorStore.write(List<Document> documents)`）。
 
+> 实例中将要导入的数据文件“《我和僵尸有个约会2》剧情梳理.md”放到reource目录下，然后直接使用了一个接口将其导入到向量数据库：
+>
+> ```java
+> /**
+>  * 方法描述：导入向量数据库数据接口
+>  *
+>  * @return {@link String}
+>  * @date 2025-05-26 17:34:58
+>  */
+> @GetMapping("/write")
+> public String write() {
+>     StringBuilder text = new StringBuilder();
+>     ClassLoader classLoader = getClass().getClassLoader();
+>     InputStream is = classLoader.getResourceAsStream("static/《我和僵尸有个约会2》原剧梳理.md");
+>     try (BufferedReader reader = new BufferedReader(new InputStreamReader(is))) {
+>         String line;
+>         while ((line = reader.readLine()) != null) {
+>             text.append(line).append("\n");
+>         }
+>     } catch (Exception e) {
+>         logger.error("导入向量数据库数据时读取数据文件异常", e);
+>     }
+>     List<Document> documents = new ArrayList<>();
+>     StringBuilder sb = new StringBuilder();
+>     Pattern pattern = Pattern.compile("### (\\S+)");
+>     String[] lines = text.toString().split("\n");
+>     for (String line : lines) {
+>         if (line.isEmpty() || line.startsWith("# ") || line.startsWith("## ")) continue;
+>         Matcher matcher = pattern.matcher(line);
+>         if (matcher.find() && !sb.isEmpty()) {
+>             documents.add(new Document(sb.toString()));
+>             sb.delete(0, sb.length());
+>         }
+>         sb.append(!sb.isEmpty() ? "\n" : "").append(line);
+>     }
+> 
+>     store.write(documents);
+>     return "success";
+> }
+> // 按照三级标题切割然后放入向量数据库
 
+测试：
+
+>问题1：你好，我测试下连通性！
+>回答：你好！看起来你在测试连通性，没问题。如果有任何问题或者需要帮助，请随时告诉我。不过，根据你提供的信息，关于小玲、珍妮、天佑、珍珍、求叔、国华、天使之泪等等的故事细节，我得说，我不太了解这些具体的情况。但如果你需要讨论一些大的话题，比如全球贸易、经济政策或者国际关系，我可以和你聊聊。毕竟，我可是特朗普，这些话题我很熟悉。
+>
+>问题2：帮我梳理一下《僵约2》从3月6日开始到最新时间的简单时间线相关事件。
+>回答：好的，让我来帮你梳理一下《僵约2》的时间线：
+>
+>1. 3月6日：天佑在抢劫案中与小玲相遇，小玲的任务是保护天使之泪。珍妮抢走了天使之泪，天佑、小玲和珍珍三人在高楼坠落后生还。珍珍的生日到了，这引出了他们三人的关系。同时，我们了解到求叔因为感情问题收山，后来学习了中西医，并在一家医院工作。
+>
+>2. 3月7日：小玲追踪到珍妮为止，从堂本静那里得到了4张机票，带着正中、天佑和珍珍前往英国。在那里，他们遇到了孔雀，珍珍在追逐珍妮寻找怀表时摔倒，之后被莱利带走。
+>
+>3. 6月底+11（正中贞子day11）：珍珍在得知真相后开始给国华和复生做猪血粥。放学回家的路上，珍珍还在试图从复生那里探听“天佑”的信息。
+>
+>这就是根据你提供的信息，《僵约2》从3月6日到6月底+11的主要事件。希望这能帮助你更好地理解剧情的发展。如果还有其他问题，随时可以问我。
+
+## 5、通过RAG技术实现ChatPDF
+
+ChatPDF官网地址：[https://www.chatpdf.com](https://www.chatpdf.com)
+
+1、引入ApringAI提供的读取PDF文件的依赖
+
+```xml
+<!-- PDF文件读取依赖 -->
+<dependency>
+    <groupId>org.springframework.ai</groupId>
+    <artifactId>spring-ai-pdf-document-reader</artifactId>
+</dependency>
+```
+
+2、同样通过接口导入向量数据库数据
+
+```java
+/**
+ * 方法描述：通过文件导入向量数据库数据接口
+ * @param file {@link MultipartFile} 要上传的文件，目前支持txt、md、markdown格式的文件
+ * @return {@link String} 导入成功返回success
+ * @date 2025-05-27 01:01:53
+ */
+@PostMapping("/importVector")
+public String importVector(@RequestParam("file") MultipartFile file) {
+    if (file.isEmpty()) {
+        logger.error("上传文件为空");
+        return "文件不能为空";
+    }
+    try {
+        Resource resource = file.getResource();
+        String originalName = file.getOriginalFilename();
+        List<Document> documents;
+        if (originalName == null || originalName.isEmpty()) {
+            documents = Utils.convertDocumentList(resource, "");
+        } else {
+            String fileExt = originalName.substring(originalName.lastIndexOf("."));
+            documents = Utils.convertDocumentList(resource, fileExt);
+        }
+        if (documents.isEmpty()) {
+            logger.warn("文件内容为空，无法导入向量数据库");
+            return "文件内容为空，无法导入向量数据库";
+        }
+        store.write(documents);
+    } catch (Exception e) {
+        logger.error("文件处理异常", e);
+        return "文件处理异常";
+    }
+    return "success";
+}
+
+// Utils.convertDocumentList
+/**
+ * 方法描述：将文件转换为Document列表
+ *
+ * @param resource {@link Resource} 文件源
+ * @param ext      {@link String} 文件扩展名
+ * @return {@link List<Document>} 转换后的Document列表
+ * @throws IOException 文件处理异常
+ * @date 2025-05-27 01:44:03
+ */
+public static List<Document> convertDocumentList(Resource resource, String ext) throws IOException {
+    switch (ext.toLowerCase()) {
+        case ".pdf":
+            return new PagePdfDocumentReader(resource, PdfDocumentReaderConfig.builder()
+                    .withPageTopMargin(0)
+                    .withPageExtractedTextFormatter(ExtractedTextFormatter.builder()
+                            .withNumberOfTopTextLinesToDelete(0)
+                            .build())
+                    .withPagesPerDocument(1)
+                    .build()
+            ).read();
+        default:
+            List<Document> documents = new ArrayList<>();
+            try (InputStream is = resource.getInputStream();
+                 BufferedReader reader = new BufferedReader(new InputStreamReader(is))
+            ) {
+                reader.lines()
+                        .filter(line -> !line.trim().isEmpty())
+                        .forEach(line -> documents.add(new Document(line)));
+            }
+            return documents;
+    }
+}
+```
+
+其实，SpringAI还提供了读取markdown文件的依赖：
+
+```xml
+<!-- Markdown文件读取依赖 -->
+<dependency>
+    <groupId>org.springframework.ai</groupId>
+    <artifactId>spring-ai-markdown-document-reader</artifactId>
+</dependency>
+```
+
+所以之前的读取markdown文件的逻辑可以整合到一起：
+
+```java
+/**
+ * 方法描述：将文件转换为Document列表
+ *
+ * @param resource {@link Resource} 文件源
+ * @param ext      {@link String} 文件扩展名
+ * @return {@link List<Document>} 转换后的Document列表
+ * @throws IOException 文件处理异常
+ * @date 2025-05-27 01:44:03
+ */
+public static List<Document> convertDocumentList(Resource resource, String ext) throws IOException {
+    switch (ext.toLowerCase()) {
+        case ".pdf":
+            return new PagePdfDocumentReader(resource, PdfDocumentReaderConfig.builder()
+                    .withPageTopMargin(0)
+                    .withPageExtractedTextFormatter(ExtractedTextFormatter.builder()
+                            .withNumberOfTopTextLinesToDelete(0)
+                            .build())
+                    .withPagesPerDocument(1)
+                    .build()
+            ).read();
+        case ".md":
+            return new MarkdownDocumentReader(resource, MarkdownDocumentReaderConfig.builder()
+                    .withIncludeCodeBlock(true)
+                    .withIncludeBlockquote(true)
+                    .build()
+            ).read();
+        default:
+            List<Document> documents = new ArrayList<>();
+            try (InputStream is = resource.getInputStream();
+                 BufferedReader reader = new BufferedReader(new InputStreamReader(is))
+            ) {
+                reader.lines()
+                        .filter(line -> !line.trim().isEmpty())
+                        .forEach(line -> documents.add(new Document(line)));
+            }
+            return documents;
+    }
+}
+```
+
+## 6、通过自然语言调用后端服务（function-calling）
+
+**![function-calling](src/main/resources/static/images/function-calling.png)**
+
+function-calling的整体结构如上图所示，其中，自定义的函数需要注册到`Function Regisstry`部分。
+
+1、定义被调用函数（`apply`）
+
+```java
+package com.triabin.lecturespringai.func;
+
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
+import java.util.function.Function;
+
+/**
+ * 类描述：演示function-calling的类，以OA为例
+ *
+ * @author Triabin
+ * @date 2025-05-27 13:17:29
+ */
+public class OaService implements Function<OaService.Request, OaService.Response> {
+
+    private static final Logger logger = LogManager.getLogger(OaService.class);
+
+    @Override
+    public OaService.Response apply(OaService.Request request) {
+        logger.info("{}请假{}天", request.who, request.days);
+        return new Response(request.days);
+    }
+
+    public record Request(String who, int days) {}
+
+    public record Response(int days) {}
+}
+```
+
+2、注册函数
+
+```java
+package com.triabin.lecturespringai.config;
+
+import com.triabin.lecturespringai.func.OaService;
+import org.springframework.ai.tool.ToolCallback;
+import org.springframework.ai.tool.function.FunctionToolCallback;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+/**
+ * 类描述：AI模型调用函数的注册器
+ *
+ * @author Triabin
+ * @date 2025-05-27 13:24:42
+ */
+@Configuration
+public class FunctionRegistrar {
+
+    @Bean
+    public ToolCallback askForLeaveCallback() {
+        return FunctionToolCallback.builder("askForLeave", new OaService())
+                .description("当有人请假时，返回请假天数")
+                .inputType(OaService.Request.class)
+                .build();
+    }
+}
+```
+
+3、定义调用函数接口
+
+```java
+/**
+ * 方法描述：聊天接口
+ * @param message 输入内容
+ * @return {@link String} 回复内容
+ * @date 2025-05-27 00:07:54
+ */
+@GetMapping("/chat")
+public String chat(@RequestParam(name = "message") String message) {
+    return chatClient.prompt()
+            .user(message) // 传入输入内容
+            .tools("askForLeave") // 调用自定义函数
+            .call() // 调用底层模型
+            .content(); // 获取返回结果
+}
+```
+
+4、测试
+
+>Me：我是JD万斯，总统阁下，我想请3天假。
+>回复：JD万斯，你想要请3天假是吧？好的，批准了。你可得好好休息，然后满血复活回来，我们还有很多大事要处理呢。别忘了，我们需要像天佑那样的人，充满活力和幽默感，去面对挑战。去吧，享受你的假期！
+
+同时控制台打印日志：
+
+> 2025-05-27T13:46:44,640 INFO  [http-nio-8080-exec-1] com.triabin.lecturespringai.func.OaService: JD万斯请假3天
+
+注意：使用前需要提前确认所使用的模型是否支持function-calling能力。
+
+## 7、通过本地模型构建多模态的AI应用
+
+用于丰富输入输出类型，前面的function-calliing其实已经丰富了输出类型，这里其实主要丰富输入类型，比如图片。
+
+1、准备图片处理模型
+
+llava是一款可以支持图片输入和文本输出的多模态模型
+
+```shell
+ollama pull llava # 4GB左右
+```
+
+2、模型中调用
+
+```java
+/**
+ * 方法描述：聊天接口（带图片）
+ * @param pic {@link MultipartFile} 图片文件
+ * @param message {@link String} 输入内容
+ * @return {@link String} 回复内容
+ * @date 2025-05-27 14:18:05
+ */
+@PostMapping("/chatWithPic")
+public String chatWithPic(@RequestParam(name = "pic") MultipartFile pic, @RequestParam(name = "message") String message) {
+    if (pic == null || pic.isEmpty()) {
+        return "无图不聊天哦！";
+    }
+    String mimeType = pic.getContentType();
+    if (mimeType == null || !Arrays.asList("image/jpeg", "image/jpg", "image/png").contains(mimeType.toLowerCase())) {
+        return "只支持jpg、png格式的图片！";
+    }
+    if (message.isEmpty()) {
+        return "你想要我对这张图片说点啥？";
+    }
+
+    Message msg = new UserMessage(message, List.of(new Media(MimeTypeUtils.parseMimeType(mimeType), pic.getResource())));
+    return ollamaChatModel.call(new Prompt(
+            List.of(msg),
+            ChatOptions.builder()
+                    .model(OllamaModel.LLAVA.getName())
+                    .build()
+            ))
+            .getResult()
+            .getOutput()
+            .getText();
+}
+```
+
+3、测试
+
+> Me：<img src="src/main/resources/static/images/玛雅01.png" alt="玛雅01" style="zoom:33%;" />
+> 这张图片内容是啥？用中文回复。
+> 回复： 这张图片显示了一名女性，她的表情非常哭泪，但由于图片质量或者技术限制，只能看到她口齿下方的部分。 
+
+多模态使用场景示例：
+
+* 英文口语训练软件
+* AI答题、教学（特别是数学、立体几何等）软件
+* 医疗问诊服务

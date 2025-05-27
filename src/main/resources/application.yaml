@@ -1,6 +1,11 @@
 spring:
   application:
     name: lecture-spring-ai
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 20MB
+      resolve-lazily: true
   datasource:
     url: jdbc:postgresql://192.168.2.100:5433/springai
     username: Administrator
@@ -28,6 +33,12 @@ spring:
         options:
           model: moonshot-v1-8k
           temperature: 0.7
+
+server:
+  servlet:
+    encoding:
+      charset: UTF-8
+
 # 配置日志
 logging:
   config: classpath:log4j2.xml

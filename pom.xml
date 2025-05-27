@@ -150,6 +150,17 @@
             <version>${fastjson2.version}</version>
         </dependency>
 
+        <!-- PDF文件读取依赖 -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-pdf-document-reader</artifactId>
+        </dependency>
+
+        <!-- Markdown文件读取依赖 -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-markdown-document-reader</artifactId>
+        </dependency>
     </dependencies>
 
     <build>
